@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CSV Data Sorter</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">QP5 Data Tools</p>
+        <h1>CSV Data Sorter</h1>
+        <p class="subtitle">
+          Enter full file paths on disk, choose columns, arrange order, remove duplicates,
+          and save the output directly to any folder. Works for small and very large CSV files.
+        </p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>1. Choose input</h2>
+          <div class="mode-toggle">
+            <button type="button" class="mode-btn active" id="modeSingleBtn">Single file</button>
+            <button type="button" class="mode-btn" id="modeMultiBtn">Multiple files</button>
+          </div>
+        </div>
+
+        <div id="singleFilePanel">
+          <label class="field">
+            <span>Full path to CSV file</span>
+            <div class="path-row">
+              <input type="text" id="inputFilePath" placeholder="D:\folder\data\orders.csv">
+              <button type="button" class="btn secondary" id="browseInputBtn">Choose file</button>
+            </div>
+          </label>
+
+          <div class="actions">
+            <button type="button" class="btn primary" id="loadFileBtn">Load file</button>
+          </div>
+
+          <p class="panel-note path-note">
+            Click <strong>Choose file</strong> to open the Windows file picker, or paste a full path and click Load file.
+          </p>
+        </div>
+
+        <div id="multiFilePanel" class="hidden">
+          <label class="field">
+            <span>CSV file paths (one per line)</span>
+            <textarea id="multiFilePaths" rows="6" placeholder="D:\data\file1.csv&#10;D:\data\file2.csv&#10;D:\data\file3.csv"></textarea>
+          </label>
+
+          <div class="actions">
+            <button type="button" class="btn secondary" id="browseMultiBtn">Choose files</button>
+            <button type="button" class="btn primary" id="loadMultiBtn">Load files</button>
+            <button type="button" class="btn ghost" id="clearMultiBtn">Clear list</button>
+          </div>
+
+          <p class="panel-note path-note">
+            Click <strong>Choose files</strong>, then hold <strong>Ctrl</strong> and click each CSV to select many at once.
+            You can also paste paths below (one per line).
+          </p>
+
+          <ul class="file-list hidden" id="multiFileList"></ul>
+        </div>
+
+        <p class="status-banner hidden" id="statusBanner"></p>
+
+        <div class="file-meta hidden" id="fileMeta">
+          <div>
+            <span class="label">Loaded</span>
+            <strong id="loadedFileName"></strong>
+          </div>
+          <div>
+            <span class="label">Full path</span>
+            <strong id="loadedFilePath" class="path-value"></strong>
+          </div>
+          <div>
+            <span class="label">File size</span>
+            <strong id="loadedFileSize"></strong>
+          </div>
+          <div>
+            <span class="label">Columns</span>
+            <strong id="loadedColumnCount"></strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="columnsPanel">
+        <div class="panel-header">
+          <div>
+            <h2>2. Select columns to keep</h2>
+            <p class="panel-note">Unchecked columns will be removed from the output.</p>
+          </div>
+          <div class="toolbar">
+            <select id="presetSelect" class="select-input">
+              <option value="">Load preset...</option>
+            </select>
+            <button type="button" class="btn ghost" id="selectAllBtn">Select all</button>
+            <button type="button" class="btn ghost" id="clearAllBtn">Clear all</button>
+          </div>
+        </div>
+
+        <div class="column-grid" id="columnGrid"></div>
+
+        <div class="order-section hidden" id="orderSection">
+          <div class="order-header">
+            <div>
+              <h3>Arrange output order</h3>
+              <p class="panel-note">
+                Drag columns or use the buttons to change order. Merged row values follow this order left to right.
+              </p>
+            </div>
+          </div>
+          <div class="order-list" id="columnOrderList"></div>
+          <p class="order-empty hidden" id="orderEmpty">Select at least one column above to arrange order.</p>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="optionsPanel">
+        <div class="panel-header">
+          <h2>3. Output and options</h2>
+        </div>
+
+        <div class="path-grid">
+          <label class="field">
+            <span>Output directory</span>
+            <div class="path-row">
+              <input type="text" id="outputDir" placeholder="D:\folder\output">
+              <button type="button" class="btn secondary" id="browseOutputBtn">Choose folder</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Output filename</span>
+            <input type="text" id="outputName" value="sorted_output.csv">
+          </label>
+        </div>
+
+        <div class="options-grid">
+          <label class="option-card">
+            <input type="checkbox" id="skipEmpty" checked>
+            <div>
+              <strong>Skip empty values</strong>
+              <span>Do not include blank cells in the merged row text.</span>
+            </div>
+          </label>
+
+          <label class="option-card hidden" id="removeDuplicatesWrap">
+            <input type="checkbox" id="removeDuplicates">
+            <div>
+              <strong>Remove duplicate rows</strong>
+              <span>Delete rows with identical values in the selected columns. Keeps the first match.</span>
+            </div>
+          </label>
+
+          <div class="option-card info-card hidden" id="multiDedupNote">
+            <div>
+              <strong>Cross-file duplicate removal</strong>
+              <span>Enabled automatically in multiple-file mode. Duplicates are removed across all selected files.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" id="processBtn">Start processing</button>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="progressPanel">
+        <div class="panel-header">
+          <h2>Processing</h2>
+        </div>
+        <p class="panel-note" id="progressMessage">Starting job...</p>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-stats">
+          <div><span class="label">Status</span><strong id="progressStatus">Queued</strong></div>
+          <div><span class="label">Rows read</span><strong id="progressInputRows">0</strong></div>
+          <div><span class="label">Rows written</span><strong id="progressOutputRows">0</strong></div>
+          <div><span class="label">Duplicates removed</span><strong id="progressDuplicates">0</strong></div>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="resultPanel">
+        <div class="panel-header">
+          <h2>Result</h2>
+        </div>
+        <div class="result-grid" id="resultSummary"></div>
+        <div class="saved-path hidden" id="savedPathBox">
+          <span class="label">Saved to</span>
+          <strong id="savedPath" class="path-value"></strong>
+        </div>
+        <div class="actions">
+          <a class="btn secondary hidden" id="downloadBtn" href="#">Download copy</a>
+          <button type="button" class="btn secondary" id="resetBtn">Start over</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=6"></script>
+</body>
+</html>

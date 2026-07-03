@@ -1,0 +1,15 @@
+{
+  "input": "sticky_orders_ecom.csv",
+  "output": "sticky_orders_ecom_sorted.csv",
+  "keep_columns": [
+    "Credit Card #",
+    "Billing First Name",
+    "Billing Last Name",
+    "Phone",
+    "Billing Address",
+    "Billing Address 2",
+    "Billing City",
+    "Billing Zip/Postal"
+  ],
+  "keep_empty": false
+}

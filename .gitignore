@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Runtime data (not source)
+jobs/*.json
+jobs/*.sqlite
+*.sqlite
+outputs/*
+!outputs/.gitkeep
+uploads/
+
+# Local test data
+*.csv
+test result/
+new-pc-setup/
+new-pc-setup.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
