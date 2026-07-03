@@ -5,6 +5,8 @@ A local web app for cleaning and merging CSV data. Pick columns, merge each row 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 
+**Repository:** [github.com/mr-ahsan-ghaffar/Data-Sorter](https://github.com/mr-ahsan-ghaffar/Data-Sorter)
+
 ## Features
 
 - **Column picker** — choose which columns to keep and set their order
