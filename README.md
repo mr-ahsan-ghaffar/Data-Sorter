@@ -1,6 +1,9 @@
 # Data Sorter
 
-A local web app for cleaning and merging CSV data. Pick columns, merge each row into one comma-separated cell, remove duplicates, and process very large files using full disk paths — your data never leaves your PC.
+A local web app for cleaning and merging tabular data. Pick columns, merge each row into one comma-separated cell, remove duplicates, and process large files using full disk paths — your data never leaves your PC.
+
+**Input:** CSV, TXT, Excel (`.xlsx`, `.xls` — small files up to 100k rows / 25 MB)  
+**Output:** CSV
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
@@ -12,9 +15,9 @@ A local web app for cleaning and merging CSV data. Pick columns, merge each row 
 - **Column picker** — choose which columns to keep and set their order
 - **Row merge** — combine selected columns into a single output cell per row
 - **Duplicate removal** — disk-based SQLite deduplication for large files (millions of rows)
-- **Single or multiple files** — deduplicate across several CSVs in one run
+- **Multiple input formats** — CSV and TXT for large files; Excel for small spreadsheets
+- **Single or multiple files** — deduplicate across several input files in one run
 - **Native file picker** — browse files anywhere on your PC (no upload/copy into the app folder)
-- **Background jobs** — progress bar and row counts while processing
 - **Presets** — save and reuse column selections (example preset included)
 
 ## Requirements

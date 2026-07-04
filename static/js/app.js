@@ -29,6 +29,7 @@ const browseOutputBtn = document.getElementById("browseOutputBtn");
 const fileMeta = document.getElementById("fileMeta");
 const loadedFileName = document.getElementById("loadedFileName");
 const loadedFilePath = document.getElementById("loadedFilePath");
+const loadedFileType = document.getElementById("loadedFileType");
 const loadedFileSize = document.getElementById("loadedFileSize");
 const loadedColumnCount = document.getElementById("loadedColumnCount");
 const columnsPanel = document.getElementById("columnsPanel");
@@ -175,7 +176,7 @@ function getColumnMeta(name) {
 async function loadMultiFilesFromTextarea() {
   const paths = parsePathLines(multiFilePaths.value);
   if (paths.length < 2) {
-    showToast("Add at least 2 CSV file paths.", true);
+    showToast("Add at least 2 input file paths.", true);
     return;
   }
 
@@ -444,10 +445,11 @@ function handleLoadedFile(data) {
   inputFilePath.value = data.file_path;
   loadedFileName.textContent = data.filename;
   loadedFilePath.textContent = data.file_path;
+  loadedFileType.textContent = data.file_type || "Unknown";
   loadedFileSize.textContent = data.file_size_label || "Unknown";
   loadedColumnCount.textContent = String(data.column_count);
   outputDir.value = data.default_output_dir || "";
-  outputName.value = `${data.filename.replace(/\.csv$/i, "")}_sorted.csv`;
+  outputName.value = `${data.filename.replace(/\.[^.]+$/, "")}_sorted.csv`;
 
   renderColumns(data.columns);
   showWorkflowPanels();
@@ -570,7 +572,7 @@ async function browseForOutputDir() {
 async function loadFileFromPath() {
   const filePath = inputFilePath.value.trim();
   if (!filePath) {
-    showToast("Enter the full path to a CSV file.", true);
+    showToast("Enter the full path to an input file (CSV, TXT, or Excel).", true);
     return;
   }
 
@@ -610,11 +612,11 @@ async function processCurrentFile() {
 
   if (isMulti) {
     if (state.filePaths.length < 2) {
-      showToast("Load at least 2 CSV files first.", true);
+      showToast("Load at least 2 input files first.", true);
       return;
     }
   } else if (!state.fileRef) {
-    showToast("Load an input CSV file first.", true);
+    showToast("Load an input file first.", true);
     return;
   }
 

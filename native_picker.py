@@ -23,13 +23,19 @@ def pick(mode: str) -> list[str]:
     root.focus_force()
     root.update()
 
-    filetypes = [("CSV files", "*.csv"), ("All files", "*.*")]
+    filetypes = [
+        ("Supported files", "*.csv;*.txt;*.xlsx;*.xls"),
+        ("CSV files", "*.csv"),
+        ("Text files", "*.txt"),
+        ("Excel files", "*.xlsx;*.xls"),
+        ("All files", "*.*"),
+    ]
 
     try:
         if mode == "file":
             picked = filedialog.askopenfilename(
                 parent=root,
-                title="Select CSV file",
+                title="Select input file (CSV, TXT, or Excel)",
                 filetypes=filetypes,
             )
             return [picked] if picked else []
@@ -37,7 +43,7 @@ def pick(mode: str) -> list[str]:
         if mode == "files":
             picked = filedialog.askopenfilenames(
                 parent=root,
-                title="Select multiple CSV files (Ctrl+click each file)",
+                title="Select multiple files (CSV, TXT, or Excel)",
                 filetypes=filetypes,
             )
             if isinstance(picked, str):

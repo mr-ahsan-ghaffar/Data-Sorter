@@ -6,9 +6,10 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file
 
 from data_sorter import column_info, read_header, resolve_columns_by_name
+from file_io import SUPPORTED_INPUT_LABEL, file_type_label, validate_input_file
 from job_manager import create_job, get_job
 from file_dialog import browse_csv_file, browse_csv_files, browse_output_directory
-from path_utils import make_file_ref, resolve_input_csv, resolve_output_csv
+from path_utils import make_file_ref, resolve_input_file, resolve_output_csv
 
 APP_PORT = 5055
 BASE_DIR = Path(__file__).resolve().parent
@@ -34,10 +35,7 @@ def resolve_file_ref(file_ref: str) -> Path:
     if not file_ref.startswith("path:"):
         raise ValueError("Invalid file reference.")
     path = Path(file_ref.removeprefix("path:")).resolve()
-    if not path.is_file():
-        raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix.lower() != ".csv":
-        raise ValueError("Input file must be a .csv file.")
+    validate_input_file(path)
     return path
 
 
@@ -47,6 +45,7 @@ def analyze_file(path: Path) -> dict:
         "file_ref": make_file_ref(path),
         "file_path": str(path),
         "filename": path.name,
+        "file_type": file_type_label(path),
         "file_size": path.stat().st_size,
         "file_size_label": format_file_size(path.stat().st_size),
         "column_count": len(header),
@@ -62,7 +61,7 @@ def index():
 
 def analyze_files(paths: list[Path]) -> dict:
     if not paths:
-        raise ValueError("Select at least one CSV file.")
+        raise ValueError(f"Select at least one input file ({SUPPORTED_INPUT_LABEL}).")
 
     first = analyze_file(paths[0])
     total_size = sum(path.stat().st_size for path in paths)
@@ -104,13 +103,13 @@ def open_paths_files():
         raw_paths = [line.strip() for line in raw_paths.splitlines() if line.strip()]
 
     if not raw_paths:
-        return jsonify({"error": "Add at least one CSV file path."}), 400
+        return jsonify({"error": f"Add at least one input file ({SUPPORTED_INPUT_LABEL})."}), 400
 
     try:
         resolved: list[Path] = []
         seen: set[str] = set()
         for raw_path in raw_paths:
-            path = resolve_input_csv(str(raw_path).strip())
+            path = resolve_input_file(str(raw_path).strip())
             key = str(path)
             if key in seen:
                 continue
@@ -118,7 +117,7 @@ def open_paths_files():
             resolved.append(path)
 
         if len(resolved) < 2:
-            return jsonify({"error": "Add at least 2 CSV files for multi-file duplicate removal."}), 400
+            return jsonify({"error": "Add at least 2 input files for multi-file duplicate removal."}), 400
 
         return jsonify(analyze_files(resolved))
     except FileNotFoundError as exc:
@@ -161,10 +160,10 @@ def open_path_file():
     data = request.get_json(silent=True) or {}
     file_path = str(data.get("file_path", "")).strip()
     if not file_path:
-        return jsonify({"error": "Enter the full path to a CSV file."}), 400
+        return jsonify({"error": f"Enter the full path to an input file ({SUPPORTED_INPUT_LABEL})."}), 400
 
     try:
-        source_path = resolve_input_csv(file_path)
+        source_path = resolve_input_file(file_path)
         return jsonify(analyze_file(source_path))
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
@@ -205,11 +204,11 @@ def start_job():
 
     if multi_mode:
         if not input_paths_raw:
-            return jsonify({"error": "Load at least 2 CSV files first."}), 400
+            return jsonify({"error": "Load at least 2 input files first."}), 400
         if len(input_paths_raw) < 2:
-            return jsonify({"error": "Multi-file mode needs at least 2 CSV files."}), 400
+            return jsonify({"error": "Multi-file mode needs at least 2 input files."}), 400
     elif not file_ref:
-        return jsonify({"error": "Load an input CSV file first."}), 400
+        return jsonify({"error": "Load an input file first."}), 400
 
     if not keep_columns:
         return jsonify({"error": "Select at least one column to keep."}), 400
@@ -220,7 +219,7 @@ def start_job():
         output_path = resolve_output_csv(output_dir, output_name)
 
         if multi_mode:
-            input_paths = [resolve_input_csv(str(path)) for path in input_paths_raw]
+            input_paths = [resolve_input_file(str(path)) for path in input_paths_raw]
             header = read_header(input_paths[0])
             resolved_columns = resolve_columns_by_name(header, [str(name) for name in keep_columns])
             job_id = create_job(
@@ -276,6 +275,7 @@ def download_job_output(job_id: str):
 
 if __name__ == "__main__":
     url = f"http://127.0.0.1:{APP_PORT}"
-    print(f"CSV Data Sorter running at {url}")
-    print("Click 'Choose file' in the browser to pick a CSV from anywhere on your PC.")
+    print(f"Data Sorter running at {url}")
+    print(f"Supported input: {SUPPORTED_INPUT_LABEL}")
+    print("Click 'Choose file' in the browser to pick a file from anywhere on your PC.")
     app.run(debug=False, host="127.0.0.1", port=APP_PORT, threaded=True)

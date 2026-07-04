@@ -4,6 +4,8 @@ from pathlib import Path
 
 from werkzeug.utils import secure_filename
 
+from file_io import SUPPORTED_INPUT_LABEL, validate_input_file
+
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = BASE_DIR / "outputs"
 
@@ -19,13 +21,19 @@ def normalize_path(path_text: str) -> Path:
     return Path(cleaned).expanduser().resolve()
 
 
-def resolve_input_csv(path_text: str) -> Path:
+def resolve_input_file(path_text: str) -> Path:
     path = normalize_path(path_text)
-    if not path.is_file():
-        raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix.lower() != ".csv":
-        raise ValueError("Input file must be a .csv file.")
+    validate_input_file(path)
     return path
+
+
+def resolve_input_csv(path_text: str) -> Path:
+    """Backward-compatible alias for resolve_input_file."""
+    return resolve_input_file(path_text)
+
+
+def unsupported_input_message() -> str:
+    return f"Input must be a supported file type: {SUPPORTED_INPUT_LABEL}."
 
 
 def resolve_output_csv(output_dir_text: str, output_name: str) -> Path:

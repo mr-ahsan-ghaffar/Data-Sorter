@@ -4,10 +4,12 @@ This guide walks you through installing and running **Data Sorter** on a new Win
 
 ## What this tool does
 
-- Select CSV columns and merge each row into one cell
+- Select columns from **CSV, TXT, or Excel** and merge each row into one cell
 - Remove duplicate rows (works on very large files)
 - Process one file or many files together
-- Read and write using full disk paths (your CSV stays where it is)
+- Read and write using full disk paths (your files stay where they are)
+
+**Supported input:** CSV, TXT, Excel (`.xlsx`, `.xls` — max 100,000 rows and 25 MB for Excel)
 
 ---
 

@@ -18,9 +18,12 @@ import json
 import re
 import sqlite3
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from file_io import MAX_EXCEL_ROWS, is_excel_input, iter_data_rows, read_header as read_input_header
 
 # Documented misalignment in sticky_orders_ecom.csv (header label -> actual data).
 MISALIGNED_HEADERS = {
@@ -36,8 +39,7 @@ MISALIGNED_HEADERS = {
 
 
 def read_header(input_path: Path) -> list[str]:
-    with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
-        return next(csv.reader(infile))
+    return read_input_header(input_path)
 
 
 def print_columns(header: list[str], input_path: Path) -> None:
@@ -211,18 +213,17 @@ def process_csv(
         db_path = dedup_db_path or output_path.with_suffix(".dedup.sqlite")
         dedup_connection = open_dedup_database(db_path)
 
-    def emit_progress(message: str, force: bool = False) -> None:
+    def emit_progress(message: str, force: bool = False, file_pos: int | None = None) -> None:
         if not progress_callback:
             return
         if not force and input_rows % PROGRESS_ROW_INTERVAL != 0:
             return
         percent = 0
-        if input_path.stat().st_size > 0:
-            try:
-                current_pos = infile.tell()
-                percent = min(99, int((current_pos / input_path.stat().st_size) * 100))
-            except (OSError, ValueError):
-                percent = 0
+        file_size = input_path.stat().st_size
+        if file_pos is not None and file_size > 0:
+            percent = min(99, int((file_pos / file_size) * 100))
+        elif input_rows > 0 and is_excel_input(input_path):
+            percent = min(99, int((input_rows / MAX_EXCEL_ROWS) * 100))
         progress_callback(
             ProgressUpdate(
                 input_rows=input_rows,
@@ -238,27 +239,27 @@ def process_csv(
     duplicates_removed = 0
     removed_column_count = 0
 
+    header = read_header(input_path)
+    removed_column_count = len(header) - len(keep_columns)
+
+    missing = [name for name in keep_columns if name not in header]
+    if missing:
+        raise ValueError(f"Input file is missing expected columns: {', '.join(missing)}")
+
+    indices = [header.index(name) for name in keep_columns]
+    merged_header = merge_row(keep_columns, skip_empty=False)
+
     try:
-        with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
-            reader = csv.reader(infile)
-            header = next(reader)
-            removed_column_count = len(header) - len(keep_columns)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8", newline="") as outfile:
+            writer = csv.writer(outfile, quoting=csv.QUOTE_ALL)
+            writer.writerow([merged_header])
 
-            missing = [name for name in keep_columns if name not in header]
-            if missing:
-                raise ValueError(f"Input file is missing expected columns: {', '.join(missing)}")
+            emit_progress("Processing rows...", force=True)
 
-            indices = [header.index(name) for name in keep_columns]
-            merged_header = merge_row(keep_columns, skip_empty=False)
-
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with output_path.open("w", encoding="utf-8", newline="") as outfile:
-                writer = csv.writer(outfile, quoting=csv.QUOTE_ALL)
-                writer.writerow([merged_header])
-
-                emit_progress("Processing rows...", force=True)
-
-                for row in reader:
+            if is_excel_input(input_path) or input_path.suffix.lower() == ".txt":
+                row_iter: Iterable[list[str]] = iter_data_rows(input_path)
+                for row in row_iter:
                     if not row or all(not cell.strip() for cell in row):
                         continue
 
@@ -280,9 +281,36 @@ def process_csv(
                         dedup_connection.commit()
 
                     emit_progress("Processing rows...")
+            else:
+                with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
+                    reader = csv.reader(infile)
+                    next(reader, None)
 
-                if dedup_connection is not None:
-                    dedup_connection.commit()
+                    for row in reader:
+                        if not row or all(not cell.strip() for cell in row):
+                            continue
+
+                        input_rows += 1
+                        selected = [row[i].strip() if i < len(row) else "" for i in indices]
+
+                        if dedup_connection is not None:
+                            if is_duplicate(dedup_connection, row_key_hash(selected)):
+                                duplicates_removed += 1
+                                if input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                                    dedup_connection.commit()
+                                emit_progress("Processing rows...", file_pos=infile.tell())
+                                continue
+
+                        writer.writerow([merge_row(selected, skip_empty=skip_empty)])
+                        output_rows += 1
+
+                        if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                            dedup_connection.commit()
+
+                        emit_progress("Processing rows...", file_pos=infile.tell())
+
+            if dedup_connection is not None:
+                dedup_connection.commit()
     finally:
         if dedup_connection is not None:
             dedup_connection.close()
@@ -318,7 +346,7 @@ def process_multiple_csv(
     dedup_db_path: Path | None = None,
 ) -> ProcessResult:
     if not input_paths:
-        raise ValueError("Select at least one CSV file.")
+        raise ValueError("Select at least one input file.")
     if not keep_columns:
         raise ValueError("Select at least one column to keep.")
 
@@ -366,47 +394,57 @@ def process_multiple_csv(
                     force=True,
                 )
 
-                with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
-                    reader = csv.reader(infile)
-                    header = next(reader)
-                    removed_column_count = len(header) - len(keep_columns)
+                header = read_header(input_path)
+                removed_column_count = len(header) - len(keep_columns)
 
-                    missing = [name for name in keep_columns if name not in header]
-                    if missing:
-                        raise ValueError(
-                            f"{input_path.name} is missing expected columns: {', '.join(missing)}"
-                        )
+                missing = [name for name in keep_columns if name not in header]
+                if missing:
+                    raise ValueError(
+                        f"{input_path.name} is missing expected columns: {', '.join(missing)}"
+                    )
 
-                    indices = [header.index(name) for name in keep_columns]
+                indices = [header.index(name) for name in keep_columns]
 
-                    for row in reader:
-                        if not row or all(not cell.strip() for cell in row):
-                            continue
+                def process_row(row: list[str]) -> None:
+                    nonlocal input_rows, output_rows, duplicates_removed
 
-                        input_rows += 1
-                        selected = [row[i].strip() if i < len(row) else "" for i in indices]
+                    if not row or all(not cell.strip() for cell in row):
+                        return
 
-                        if dedup_connection is not None:
-                            if is_duplicate(dedup_connection, row_key_hash(selected)):
-                                duplicates_removed += 1
-                                if input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                                    dedup_connection.commit()
-                                emit_progress(
-                                    f"Processing file {file_index} of {len(input_paths)}: {input_path.name}"
-                                )
-                                continue
+                    input_rows += 1
+                    selected = [row[i].strip() if i < len(row) else "" for i in indices]
 
-                        writer.writerow([merge_row(selected, skip_empty=skip_empty)])
-                        output_rows += 1
+                    if dedup_connection is not None:
+                        if is_duplicate(dedup_connection, row_key_hash(selected)):
+                            duplicates_removed += 1
+                            if input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                                dedup_connection.commit()
+                            emit_progress(
+                                f"Processing file {file_index} of {len(input_paths)}: {input_path.name}"
+                            )
+                            return
 
-                        if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                            dedup_connection.commit()
+                    writer.writerow([merge_row(selected, skip_empty=skip_empty)])
+                    output_rows += 1
 
-                        emit_progress(
-                            f"Processing file {file_index} of {len(input_paths)}: {input_path.name}"
-                        )
+                    if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                        dedup_connection.commit()
 
-                    bytes_read += input_path.stat().st_size
+                    emit_progress(
+                        f"Processing file {file_index} of {len(input_paths)}: {input_path.name}"
+                    )
+
+                if is_excel_input(input_path) or input_path.suffix.lower() == ".txt":
+                    for row in iter_data_rows(input_path):
+                        process_row(row)
+                else:
+                    with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
+                        reader = csv.reader(infile)
+                        next(reader, None)
+                        for row in reader:
+                            process_row(row)
+
+                bytes_read += input_path.stat().st_size
 
             if dedup_connection is not None:
                 dedup_connection.commit()

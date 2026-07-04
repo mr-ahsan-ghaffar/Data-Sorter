@@ -14,8 +14,14 @@ def pick_file() -> str:
     root.attributes("-topmost", True)
     root.update_idletasks()
     path = filedialog.askopenfilename(
-        title="Select CSV file",
-        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        title="Select input file (CSV, TXT, or Excel)",
+        filetypes=[
+            ("Supported files", "*.csv;*.txt;*.xlsx;*.xls"),
+            ("CSV files", "*.csv"),
+            ("Text files", "*.txt"),
+            ("Excel files", "*.xlsx;*.xls"),
+            ("All files", "*.*"),
+        ],
     )
     root.destroy()
     return path or ""

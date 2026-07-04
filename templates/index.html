@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CSV Data Sorter</title>
+  <title>Data Sorter</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -11,10 +11,10 @@
     <header class="hero">
       <div>
         <p class="eyebrow">QP5 Data Tools</p>
-        <h1>CSV Data Sorter</h1>
+        <h1>Data Sorter</h1>
         <p class="subtitle">
           Enter full file paths on disk, choose columns, arrange order, remove duplicates,
-          and save the output directly to any folder. Works for small and very large CSV files.
+          and save the output directly to any folder. Supports CSV, TXT, and Excel for small files.
         </p>
       </div>
     </header>
@@ -31,9 +31,9 @@
 
         <div id="singleFilePanel">
           <label class="field">
-            <span>Full path to CSV file</span>
+            <span>Full path to input file</span>
             <div class="path-row">
-              <input type="text" id="inputFilePath" placeholder="D:\folder\data\orders.csv">
+              <input type="text" id="inputFilePath" placeholder="D:\folder\data\orders.csv or report.xlsx">
               <button type="button" class="btn secondary" id="browseInputBtn">Choose file</button>
             </div>
           </label>
@@ -43,14 +43,15 @@
           </div>
 
           <p class="panel-note path-note">
-            Click <strong>Choose file</strong> to open the Windows file picker, or paste a full path and click Load file.
+            Click <strong>Choose file</strong> to open the Windows file picker (CSV, TXT, or Excel), or paste a full path and click Load file.
+            Excel is limited to 100,000 rows and 25 MB — use CSV or TXT for large files.
           </p>
         </div>
 
         <div id="multiFilePanel" class="hidden">
           <label class="field">
-            <span>CSV file paths (one per line)</span>
-            <textarea id="multiFilePaths" rows="6" placeholder="D:\data\file1.csv&#10;D:\data\file2.csv&#10;D:\data\file3.csv"></textarea>
+            <span>Input file paths (one per line)</span>
+            <textarea id="multiFilePaths" rows="6" placeholder="D:\data\file1.csv&#10;D:\data\file2.txt&#10;D:\data\file3.xlsx"></textarea>
           </label>
 
           <div class="actions">
@@ -60,8 +61,8 @@
           </div>
 
           <p class="panel-note path-note">
-            Click <strong>Choose files</strong>, then hold <strong>Ctrl</strong> and click each CSV to select many at once.
-            You can also paste paths below (one per line).
+            Click <strong>Choose files</strong>, then hold <strong>Ctrl</strong> and click each file to select many at once.
+            Supported: CSV, TXT, Excel (.xlsx, .xls). You can also paste paths below (one per line).
           </p>
 
           <ul class="file-list hidden" id="multiFileList"></ul>
@@ -77,6 +78,10 @@
           <div>
             <span class="label">Full path</span>
             <strong id="loadedFilePath" class="path-value"></strong>
+          </div>
+          <div>
+            <span class="label">File type</span>
+            <strong id="loadedFileType"></strong>
           </div>
           <div>
             <span class="label">File size</span>
@@ -205,6 +210,6 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}?v=6"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=7"></script>
 </body>
 </html>
