@@ -8,7 +8,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from data_sorter import ProgressUpdate, process_csv, process_multiple_csv, read_header, resolve_columns_by_name
+from data_sorter import (
+    ProgressUpdate,
+    process_csv,
+    process_multiple_csv,
+    process_subtract_from_main,
+    read_header,
+    resolve_columns_by_name,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 JOBS_DIR = BASE_DIR / "jobs"
@@ -48,14 +55,27 @@ def create_job(
     output_path: Path,
     input_path: Path | None = None,
     input_paths: list[Path] | None = None,
+    subtract_mode: bool = False,
+    main_path: Path | None = None,
+    secondary_path: Path | None = None,
 ) -> str:
-    if input_path is None and not input_paths:
+    if subtract_mode:
+        if main_path is None or secondary_path is None:
+            raise ValueError("Subtract mode requires a main file and a secondary file.")
+        if input_path is not None or input_paths:
+            raise ValueError("Subtract mode cannot be combined with single or multi-file input.")
+    elif input_path is None and not input_paths:
         raise ValueError("Provide an input file or input file list.")
-    if input_path is not None and input_paths:
+    elif input_path is not None and input_paths:
         raise ValueError("Use either one input file or multiple input files.")
 
     job_id = uuid.uuid4().hex
-    multi_mode = bool(input_paths)
+    if subtract_mode:
+        mode = "subtract"
+    elif input_paths:
+        mode = "multi"
+    else:
+        mode = "single"
 
     save_job(
         job_id,
@@ -63,9 +83,11 @@ def create_job(
             "job_id": job_id,
             "status": "queued",
             "created_at": _utc_now(),
-            "mode": "multi" if multi_mode else "single",
+            "mode": mode,
             "input_path": str(input_path) if input_path else None,
             "input_paths": [str(path) for path in input_paths] if input_paths else [],
+            "main_path": str(main_path) if main_path else None,
+            "secondary_path": str(secondary_path) if secondary_path else None,
             "output_path": str(output_path),
             "output_name": output_path.name,
             "keep_columns": keep_columns,
@@ -74,7 +96,7 @@ def create_job(
             "input_rows": 0,
             "output_rows": 0,
             "duplicates_removed": 0,
-            "files_processed": len(input_paths) if input_paths else 1,
+            "files_processed": 2 if subtract_mode else (len(input_paths) if input_paths else 1),
             "progress_percent": 0,
             "message": "Waiting to start...",
             "error": None,
@@ -83,7 +105,18 @@ def create_job(
 
     worker = threading.Thread(
         target=_run_job,
-        args=(job_id, input_path, input_paths, output_path, keep_columns, skip_empty, remove_duplicates),
+        args=(
+            job_id,
+            input_path,
+            input_paths,
+            output_path,
+            keep_columns,
+            skip_empty,
+            remove_duplicates,
+            subtract_mode,
+            main_path,
+            secondary_path,
+        ),
         daemon=True,
     )
 
@@ -102,6 +135,9 @@ def _run_job(
     keep_columns: list[str],
     skip_empty: bool,
     remove_duplicates: bool,
+    subtract_mode: bool = False,
+    main_path: Path | None = None,
+    secondary_path: Path | None = None,
 ) -> None:
     dedup_db_path = JOBS_DIR / f"{job_id}_dedup.sqlite"
 
@@ -130,7 +166,20 @@ def _run_job(
             )
         )
 
-        if input_paths:
+        if subtract_mode:
+            assert main_path is not None and secondary_path is not None
+            header = read_header(main_path)
+            resolved_columns = resolve_columns_by_name(header, keep_columns)
+            result = process_subtract_from_main(
+                main_path,
+                secondary_path,
+                output_path,
+                resolved_columns,
+                skip_empty=skip_empty,
+                progress_callback=on_progress,
+                dedup_db_path=dedup_db_path,
+            )
+        elif input_paths:
             header = read_header(input_paths[0])
             resolved_columns = resolve_columns_by_name(header, keep_columns)
             result = process_multiple_csv(

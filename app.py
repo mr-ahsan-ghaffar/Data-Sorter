@@ -12,6 +12,7 @@ from file_dialog import browse_csv_file, browse_csv_files, browse_output_directo
 from path_utils import make_file_ref, resolve_input_file, resolve_output_csv
 
 APP_PORT = 5055
+APP_VERSION = "1.3.0"
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 PRESETS_DIR = BASE_DIR / "presets"
@@ -152,7 +153,15 @@ def browse_directory():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"ok": True, "browse_supported": True, "multi_browse_supported": True, "port": APP_PORT})
+    return jsonify(
+        {
+            "ok": True,
+            "browse_supported": True,
+            "multi_browse_supported": True,
+            "port": APP_PORT,
+            "version": APP_VERSION,
+        }
+    )
 
 
 @app.post("/api/open-path")
@@ -190,6 +199,58 @@ def presets():
     return jsonify({"presets": items})
 
 
+@app.post("/api/open-subtract")
+def open_subtract_files():
+    data = request.get_json(silent=True) or {}
+    main_file_path = str(data.get("main_file_path", "")).strip()
+    secondary_file_path = str(data.get("secondary_file_path", "")).strip()
+
+    if not main_file_path:
+        return jsonify({"error": "Enter the full path to the main file."}), 400
+    if not secondary_file_path:
+        return jsonify({"error": "Enter the full path to the secondary file."}), 400
+
+    try:
+        main_path = resolve_input_file(main_file_path)
+        secondary_path = resolve_input_file(secondary_file_path)
+        if main_path.resolve() == secondary_path.resolve():
+            return jsonify({"error": "Main file and secondary file must be different."}), 400
+
+        main_header = read_header(main_path)
+        secondary_header = read_header(secondary_path)
+        secondary_lookup = {name.casefold(): name for name in secondary_header}
+        shared_columns = [name for name in main_header if name.casefold() in secondary_lookup]
+        if not shared_columns:
+            return jsonify(
+                {"error": "Main and secondary files have no matching column names to compare."}
+            ), 400
+
+        return jsonify(
+            {
+                "mode": "subtract",
+                "main_file_path": str(main_path),
+                "secondary_file_path": str(secondary_path),
+                "main_file_ref": make_file_ref(main_path),
+                "secondary_file_ref": make_file_ref(secondary_path),
+                "filename": f"{secondary_path.name} (not in {main_path.name})",
+                "file_path": str(secondary_path),
+                "file_type": file_type_label(secondary_path),
+                "file_size": secondary_path.stat().st_size,
+                "file_size_label": format_file_size(secondary_path.stat().st_size),
+                "main_file_size_label": format_file_size(main_path.stat().st_size),
+                "column_count": len(shared_columns),
+                "columns": column_info(shared_columns),
+                "default_output_dir": str(secondary_path.parent),
+            }
+        )
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not open files: {exc}"}), 400
+
+
 @app.post("/api/jobs")
 def start_job():
     data = request.get_json(silent=True) or {}
@@ -201,8 +262,14 @@ def start_job():
     output_name = str(data.get("output_name", "sorted_output.csv")).strip() or "sorted_output.csv"
     output_dir = str(data.get("output_dir", "")).strip()
     multi_mode = bool(data.get("multi_mode", False))
+    subtract_mode = bool(data.get("subtract_mode", False))
+    main_file_path = str(data.get("main_file_path", "")).strip()
+    secondary_file_path = str(data.get("secondary_file_path", "")).strip()
 
-    if multi_mode:
+    if subtract_mode:
+        if not main_file_path or not secondary_file_path:
+            return jsonify({"error": "Load the main file and secondary file first."}), 400
+    elif multi_mode:
         if not input_paths_raw:
             return jsonify({"error": "Load at least 2 input files first."}), 400
         if len(input_paths_raw) < 2:
@@ -218,7 +285,21 @@ def start_job():
     try:
         output_path = resolve_output_csv(output_dir, output_name)
 
-        if multi_mode:
+        if subtract_mode:
+            main_path = resolve_input_file(main_file_path)
+            secondary_path = resolve_input_file(secondary_file_path)
+            header = read_header(main_path)
+            resolved_columns = resolve_columns_by_name(header, [str(name) for name in keep_columns])
+            job_id = create_job(
+                resolved_columns,
+                skip_empty,
+                False,
+                output_path,
+                subtract_mode=True,
+                main_path=main_path,
+                secondary_path=secondary_path,
+            )
+        elif multi_mode:
             input_paths = [resolve_input_file(str(path)) for path in input_paths_raw]
             header = read_header(input_paths[0])
             resolved_columns = resolve_columns_by_name(header, [str(name) for name in keep_columns])

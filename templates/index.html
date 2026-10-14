@@ -25,6 +25,7 @@
           <div class="mode-toggle">
             <button type="button" class="mode-btn active" id="modeSingleBtn">Single file</button>
             <button type="button" class="mode-btn" id="modeMultiBtn">Multiple files</button>
+            <button type="button" class="mode-btn" id="modeSubtractBtn">Remove from main</button>
           </div>
         </div>
 
@@ -65,6 +66,33 @@
           </p>
 
           <ul class="file-list hidden" id="multiFileList"></ul>
+        </div>
+
+        <div id="subtractFilePanel" class="hidden">
+          <label class="field">
+            <span>Main file (reference list)</span>
+            <div class="path-row">
+              <input type="text" id="mainFilePath" placeholder="D:\data\existing_customers.csv">
+              <button type="button" class="btn secondary" id="browseMainBtn">Choose main</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Secondary file (rows to filter)</span>
+            <div class="path-row">
+              <input type="text" id="secondaryFilePath" placeholder="D:\data\new_leads.csv">
+              <button type="button" class="btn secondary" id="browseSecondaryBtn">Choose file</button>
+            </div>
+          </label>
+
+          <div class="actions">
+            <button type="button" class="btn primary" id="loadSubtractBtn">Load files</button>
+          </div>
+
+          <p class="panel-note path-note">
+            Output keeps only rows from the <strong>secondary file</strong> that are <strong>not</strong> already in the main file.
+            Comparison uses the columns you select in step 2.
+          </p>
         </div>
 
         <p class="status-banner hidden" id="statusBanner"></p>
@@ -167,6 +195,13 @@
               <span>Enabled automatically in multiple-file mode. Duplicates are removed across all selected files.</span>
             </div>
           </div>
+
+          <div class="option-card info-card hidden" id="subtractNote">
+            <div>
+              <strong>Remove rows found in main file</strong>
+              <span>Rows from the secondary file that match the main file on the selected columns are removed. Only unique secondary rows are saved.</span>
+            </div>
+          </div>
         </div>
 
         <div class="actions">
@@ -186,7 +221,7 @@
           <div><span class="label">Status</span><strong id="progressStatus">Queued</strong></div>
           <div><span class="label">Rows read</span><strong id="progressInputRows">0</strong></div>
           <div><span class="label">Rows written</span><strong id="progressOutputRows">0</strong></div>
-          <div><span class="label">Duplicates removed</span><strong id="progressDuplicates">0</strong></div>
+          <div><span class="label" id="progressDuplicatesLabel">Duplicates removed</span><strong id="progressDuplicates">0</strong></div>
         </div>
       </section>
 
@@ -209,6 +244,6 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}?v=7"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=10"></script>
 </body>
 </html>

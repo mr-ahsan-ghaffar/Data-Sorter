@@ -3,6 +3,8 @@ const state = {
   fileRef: null,
   filePath: null,
   filePaths: [],
+  mainFilePath: null,
+  secondaryFilePath: null,
   filename: null,
   columns: [],
   selectedOrder: [],
@@ -12,8 +14,16 @@ const state = {
 
 const modeSingleBtn = document.getElementById("modeSingleBtn");
 const modeMultiBtn = document.getElementById("modeMultiBtn");
+const modeSubtractBtn = document.getElementById("modeSubtractBtn");
 const singleFilePanel = document.getElementById("singleFilePanel");
 const multiFilePanel = document.getElementById("multiFilePanel");
+const subtractFilePanel = document.getElementById("subtractFilePanel");
+const mainFilePath = document.getElementById("mainFilePath");
+const secondaryFilePath = document.getElementById("secondaryFilePath");
+const browseMainBtn = document.getElementById("browseMainBtn");
+const browseSecondaryBtn = document.getElementById("browseSecondaryBtn");
+const loadSubtractBtn = document.getElementById("loadSubtractBtn");
+const subtractNote = document.getElementById("subtractNote");
 const multiFilePaths = document.getElementById("multiFilePaths");
 const browseMultiBtn = document.getElementById("browseMultiBtn");
 const loadMultiBtn = document.getElementById("loadMultiBtn");
@@ -54,6 +64,7 @@ const progressStatus = document.getElementById("progressStatus");
 const progressInputRows = document.getElementById("progressInputRows");
 const progressOutputRows = document.getElementById("progressOutputRows");
 const progressDuplicates = document.getElementById("progressDuplicates");
+const progressDuplicatesLabel = document.getElementById("progressDuplicatesLabel");
 const resultSummary = document.getElementById("resultSummary");
 const savedPathBox = document.getElementById("savedPathBox");
 const savedPath = document.getElementById("savedPath");
@@ -120,10 +131,17 @@ function setInputMode(mode) {
   state.mode = mode;
   modeSingleBtn?.classList.toggle("active", mode === "single");
   modeMultiBtn?.classList.toggle("active", mode === "multi");
+  modeSubtractBtn?.classList.toggle("active", mode === "subtract");
   singleFilePanel?.classList.toggle("hidden", mode !== "single");
   multiFilePanel?.classList.toggle("hidden", mode !== "multi");
-  removeDuplicatesWrap?.classList.toggle("hidden", mode === "multi");
+  subtractFilePanel?.classList.toggle("hidden", mode !== "subtract");
+  removeDuplicatesWrap?.classList.toggle("hidden", mode !== "single");
   multiDedupNote?.classList.toggle("hidden", mode !== "multi");
+  subtractNote?.classList.toggle("hidden", mode !== "subtract");
+  if (progressDuplicatesLabel) {
+    progressDuplicatesLabel.textContent =
+      mode === "subtract" ? "Rows matched main (removed)" : "Duplicates removed";
+  }
   hideStatus();
 }
 
@@ -193,6 +211,98 @@ async function loadMultiFilesFromTextarea() {
     showToast(error.message, true);
   } finally {
     setLoading(loadMultiBtn, false);
+  }
+}
+
+async function browseForInputInto(targetInput) {
+  hideStatus();
+  showToast("A file picker window should open on your desktop (check behind this browser).");
+  const data = await fetchJson("/api/browse-file", { method: "POST" });
+  if (data.cancelled || !data.path) {
+    showToast("File selection cancelled.");
+    return null;
+  }
+  targetInput.value = data.path;
+  return data.path;
+}
+
+async function browseForMainFile() {
+  if (!browseMainBtn || !mainFilePath) return;
+  setLoading(browseMainBtn, true, "Choose...");
+  try {
+    await browseForInputInto(mainFilePath);
+  } catch (error) {
+    showStatus(error.message);
+    showToast(error.message, true);
+  } finally {
+    setLoading(browseMainBtn, false);
+  }
+}
+
+async function browseForSecondaryFile() {
+  if (!browseSecondaryBtn || !secondaryFilePath) return;
+  setLoading(browseSecondaryBtn, true, "Choose...");
+  try {
+    await browseForInputInto(secondaryFilePath);
+  } catch (error) {
+    showStatus(error.message);
+    showToast(error.message, true);
+  } finally {
+    setLoading(browseSecondaryBtn, false);
+  }
+}
+
+function handleLoadedSubtractFiles(data) {
+  state.fileRef = null;
+  state.filePath = data.secondary_file_path;
+  state.filePaths = [];
+  state.mainFilePath = data.main_file_path;
+  state.secondaryFilePath = data.secondary_file_path;
+  state.filename = data.filename;
+  state.columns = data.columns;
+  state.selectedOrder = [];
+
+  mainFilePath.value = data.main_file_path;
+  secondaryFilePath.value = data.secondary_file_path;
+  loadedFileName.textContent = data.filename;
+  loadedFilePath.textContent = `Main: ${data.main_file_path}\nSecondary: ${data.secondary_file_path}`;
+  loadedFileType.textContent = data.file_type || "Unknown";
+  loadedFileSize.textContent = `${data.main_file_size_label || "?"} main / ${data.file_size_label || "?"}`;
+  loadedColumnCount.textContent = String(data.column_count);
+  outputDir.value = data.default_output_dir || outputDir.value;
+  outputName.value = "unique_rows.csv";
+
+  renderColumns(data.columns);
+  showWorkflowPanels();
+  showStatus("Loaded main and secondary files. Select columns to compare, then start processing.", false);
+  showToast("Subtract files loaded.");
+}
+
+async function loadSubtractFiles() {
+  const mainPath = mainFilePath?.value.trim();
+  const secondaryPath = secondaryFilePath?.value.trim();
+
+  if (!mainPath || !secondaryPath) {
+    showToast("Enter both the main file path and the secondary file path.", true);
+    return;
+  }
+
+  setLoading(loadSubtractBtn, true, "Loading...");
+  try {
+    const data = await fetchJson("/api/open-subtract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        main_file_path: mainPath,
+        secondary_file_path: secondaryPath,
+      }),
+    });
+    handleLoadedSubtractFiles(data);
+  } catch (error) {
+    showStatus(error.message);
+    showToast(error.message, true);
+  } finally {
+    setLoading(loadSubtractBtn, false);
   }
 }
 
@@ -469,11 +579,13 @@ function updateProgressView(job) {
 
 function showCompletedResult(job) {
   const filesProcessed = job.files_processed || 1;
+  const removedLabel = job.mode === "subtract" ? "Rows matched main (removed)" : "Duplicates removed";
+  const inputLabel = job.mode === "subtract" ? "Secondary rows read" : "Input rows";
   resultSummary.innerHTML = `
     <div class="stat-card"><span class="label">Files processed</span><strong>${Number(filesProcessed).toLocaleString()}</strong></div>
-    <div class="stat-card"><span class="label">Input rows</span><strong>${Number(job.input_rows || 0).toLocaleString()}</strong></div>
+    <div class="stat-card"><span class="label">${inputLabel}</span><strong>${Number(job.input_rows || 0).toLocaleString()}</strong></div>
     <div class="stat-card"><span class="label">Output rows</span><strong>${Number(job.output_rows || 0).toLocaleString()}</strong></div>
-    <div class="stat-card"><span class="label">Duplicates removed</span><strong>${Number(job.duplicates_removed || 0).toLocaleString()}</strong></div>
+    <div class="stat-card"><span class="label">${removedLabel}</span><strong>${Number(job.duplicates_removed || 0).toLocaleString()}</strong></div>
     <div class="stat-card"><span class="label">Columns kept</span><strong>${(job.kept_columns || []).length}</strong></div>
   `;
 
@@ -609,8 +721,14 @@ async function processCurrentFile() {
   const keepColumns = getSelectedColumns();
   const outputDirectory = outputDir.value.trim();
   const isMulti = state.mode === "multi";
+  const isSubtract = state.mode === "subtract";
 
-  if (isMulti) {
+  if (isSubtract) {
+    if (!state.mainFilePath || !state.secondaryFilePath) {
+      showToast("Load the main file and secondary file first.", true);
+      return;
+    }
+  } else if (isMulti) {
     if (state.filePaths.length < 2) {
       showToast("Load at least 2 input files first.", true);
       return;
@@ -637,7 +755,11 @@ async function processCurrentFile() {
   downloadBtn.classList.add("hidden");
   updateProgressView({
     status: "queued",
-    message: isMulti ? "Starting multi-file job..." : "Starting background job...",
+    message: isSubtract
+      ? "Starting subtract job..."
+      : isMulti
+        ? "Starting multi-file job..."
+        : "Starting background job...",
     progress_percent: 0,
     input_rows: 0,
     output_rows: 0,
@@ -651,9 +773,13 @@ async function processCurrentFile() {
     output_dir: outputDirectory,
     output_name: outputName.value.trim() || "sorted_output.csv",
     multi_mode: isMulti,
+    subtract_mode: isSubtract,
   };
 
-  if (isMulti) {
+  if (isSubtract) {
+    payload.main_file_path = state.mainFilePath;
+    payload.secondary_file_path = state.secondaryFilePath;
+  } else if (isMulti) {
     payload.input_paths = state.filePaths;
   } else {
     payload.file_ref = state.fileRef;
@@ -681,11 +807,15 @@ function resetWorkflow() {
   state.fileRef = null;
   state.filePath = null;
   state.filePaths = [];
+  state.mainFilePath = null;
+  state.secondaryFilePath = null;
   state.filename = null;
   state.columns = [];
   state.selectedOrder = [];
   state.currentJobId = null;
   if (multiFilePaths) multiFilePaths.value = "";
+  if (mainFilePath) mainFilePath.value = "";
+  if (secondaryFilePath) secondaryFilePath.value = "";
   renderMultiFileList([]);
   columnGrid.innerHTML = "";
   columnOrderList.innerHTML = "";
@@ -707,12 +837,17 @@ function resetWorkflow() {
   setLoading(processBtn, false);
   setLoading(loadFileBtn, false);
   setLoading(loadMultiBtn, false);
+  setLoading(loadSubtractBtn, false);
   hideStatus();
 }
 
 modeSingleBtn?.addEventListener("click", () => setInputMode("single"));
 modeMultiBtn?.addEventListener("click", () => setInputMode("multi"));
+modeSubtractBtn?.addEventListener("click", () => setInputMode("subtract"));
 loadMultiBtn?.addEventListener("click", loadMultiFilesFromTextarea);
+loadSubtractBtn?.addEventListener("click", loadSubtractFiles);
+browseMainBtn?.addEventListener("click", browseForMainFile);
+browseSecondaryBtn?.addEventListener("click", browseForSecondaryFile);
 browseMultiBtn?.addEventListener("click", browseForMultipleFiles);
 clearMultiBtn?.addEventListener("click", () => {
   multiFilePaths.value = "";
@@ -745,9 +880,18 @@ resetBtn.addEventListener("click", resetWorkflow);
 loadPresets();
 checkServerHealth();
 
+const EXPECTED_APP_VERSION = "1.3.0";
+
 async function checkServerHealth() {
   try {
-    await fetchJson("/api/health");
+    const data = await fetchJson("/api/health");
+    if (data.version && data.version !== EXPECTED_APP_VERSION) {
+      showStatus(
+        `Server version ${data.version} is outdated. Close the server window, run start_server.bat again, then press Ctrl+F5.`,
+        true
+      );
+      return;
+    }
     hideStatus();
   } catch {
     showStatus("Server is outdated or not running. Close any old server window, run start_server.bat, then press Ctrl+F5.");

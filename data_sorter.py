@@ -196,6 +196,34 @@ def is_duplicate(connection: sqlite3.Connection, key_hash: str) -> bool:
     return cursor.rowcount == 0
 
 
+def key_exists(connection: sqlite3.Connection, key_hash: str) -> bool:
+    row = connection.execute("SELECT 1 FROM seen WHERE key_hash = ? LIMIT 1", (key_hash,)).fetchone()
+    return row is not None
+
+
+def register_key(connection: sqlite3.Connection, key_hash: str) -> None:
+    connection.execute("INSERT OR IGNORE INTO seen (key_hash) VALUES (?)", (key_hash,))
+
+
+def _column_indices(header: list[str], columns: list[str], file_label: str) -> list[int]:
+    missing = [name for name in columns if name not in header]
+    if missing:
+        raise ValueError(f"{file_label} is missing expected columns: {', '.join(missing)}")
+    return [header.index(name) for name in columns]
+
+
+def _iterate_data_rows(path: Path) -> Iterable[list[str]]:
+    if is_excel_input(path) or path.suffix.lower() == ".txt":
+        yield from iter_data_rows(path)
+        return
+
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
+        reader = csv.reader(infile)
+        next(reader, None)
+        for row in reader:
+            yield row
+
+
 def process_csv(
     input_path: Path,
     output_path: Path,
@@ -213,15 +241,31 @@ def process_csv(
         db_path = dedup_db_path or output_path.with_suffix(".dedup.sqlite")
         dedup_connection = open_dedup_database(db_path)
 
-    def emit_progress(message: str, force: bool = False, file_pos: int | None = None) -> None:
+    input_rows = 0
+    output_rows = 0
+    duplicates_removed = 0
+    removed_column_count = 0
+    bytes_processed = 0
+    file_size = max(input_path.stat().st_size, 1)
+
+    header = read_header(input_path)
+    removed_column_count = len(header) - len(keep_columns)
+
+    missing = [name for name in keep_columns if name not in header]
+    if missing:
+        raise ValueError(f"Input file is missing expected columns: {', '.join(missing)}")
+
+    indices = [header.index(name) for name in keep_columns]
+    merged_header = merge_row(keep_columns, skip_empty=False)
+
+    def emit_progress(message: str, force: bool = False) -> None:
         if not progress_callback:
             return
         if not force and input_rows % PROGRESS_ROW_INTERVAL != 0:
             return
         percent = 0
-        file_size = input_path.stat().st_size
-        if file_pos is not None and file_size > 0:
-            percent = min(99, int((file_pos / file_size) * 100))
+        if bytes_processed > 0:
+            percent = min(99, int((bytes_processed / file_size) * 100))
         elif input_rows > 0 and is_excel_input(input_path):
             percent = min(99, int((input_rows / MAX_EXCEL_ROWS) * 100))
         progress_callback(
@@ -234,21 +278,6 @@ def process_csv(
             )
         )
 
-    input_rows = 0
-    output_rows = 0
-    duplicates_removed = 0
-    removed_column_count = 0
-
-    header = read_header(input_path)
-    removed_column_count = len(header) - len(keep_columns)
-
-    missing = [name for name in keep_columns if name not in header]
-    if missing:
-        raise ValueError(f"Input file is missing expected columns: {', '.join(missing)}")
-
-    indices = [header.index(name) for name in keep_columns]
-    merged_header = merge_row(keep_columns, skip_empty=False)
-
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8", newline="") as outfile:
@@ -257,57 +286,29 @@ def process_csv(
 
             emit_progress("Processing rows...", force=True)
 
-            if is_excel_input(input_path) or input_path.suffix.lower() == ".txt":
-                row_iter: Iterable[list[str]] = iter_data_rows(input_path)
-                for row in row_iter:
-                    if not row or all(not cell.strip() for cell in row):
+            for row in _iterate_data_rows(input_path):
+                if not row or all(not cell.strip() for cell in row):
+                    continue
+
+                input_rows += 1
+                bytes_processed += sum(len(cell.encode("utf-8", errors="ignore")) for cell in row) + 2
+                selected = [row[i].strip() if i < len(row) else "" for i in indices]
+
+                if dedup_connection is not None:
+                    if is_duplicate(dedup_connection, row_key_hash(selected)):
+                        duplicates_removed += 1
+                        if input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                            dedup_connection.commit()
+                        emit_progress("Processing rows...")
                         continue
 
-                    input_rows += 1
-                    selected = [row[i].strip() if i < len(row) else "" for i in indices]
+                writer.writerow([merge_row(selected, skip_empty=skip_empty)])
+                output_rows += 1
 
-                    if dedup_connection is not None:
-                        if is_duplicate(dedup_connection, row_key_hash(selected)):
-                            duplicates_removed += 1
-                            if input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                                dedup_connection.commit()
-                            emit_progress("Processing rows...")
-                            continue
+                if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
+                    dedup_connection.commit()
 
-                    writer.writerow([merge_row(selected, skip_empty=skip_empty)])
-                    output_rows += 1
-
-                    if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                        dedup_connection.commit()
-
-                    emit_progress("Processing rows...")
-            else:
-                with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
-                    reader = csv.reader(infile)
-                    next(reader, None)
-
-                    for row in reader:
-                        if not row or all(not cell.strip() for cell in row):
-                            continue
-
-                        input_rows += 1
-                        selected = [row[i].strip() if i < len(row) else "" for i in indices]
-
-                        if dedup_connection is not None:
-                            if is_duplicate(dedup_connection, row_key_hash(selected)):
-                                duplicates_removed += 1
-                                if input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                                    dedup_connection.commit()
-                                emit_progress("Processing rows...", file_pos=infile.tell())
-                                continue
-
-                        writer.writerow([merge_row(selected, skip_empty=skip_empty)])
-                        output_rows += 1
-
-                        if dedup_connection is not None and input_rows % SQLITE_COMMIT_INTERVAL == 0:
-                            dedup_connection.commit()
-
-                        emit_progress("Processing rows...", file_pos=infile.tell())
+                emit_progress("Processing rows...")
 
             if dedup_connection is not None:
                 dedup_connection.commit()
@@ -434,15 +435,8 @@ def process_multiple_csv(
                         f"Processing file {file_index} of {len(input_paths)}: {input_path.name}"
                     )
 
-                if is_excel_input(input_path) or input_path.suffix.lower() == ".txt":
-                    for row in iter_data_rows(input_path):
-                        process_row(row)
-                else:
-                    with input_path.open("r", encoding="utf-8", errors="replace", newline="") as infile:
-                        reader = csv.reader(infile)
-                        next(reader, None)
-                        for row in reader:
-                            process_row(row)
+                for row in _iterate_data_rows(input_path):
+                    process_row(row)
 
                 bytes_read += input_path.stat().st_size
 
@@ -470,6 +464,123 @@ def process_multiple_csv(
         keep_columns=keep_columns,
         removed_column_count=removed_column_count,
         files_processed=len(input_paths),
+    )
+
+
+def process_subtract_from_main(
+    main_path: Path,
+    secondary_path: Path,
+    output_path: Path,
+    keep_columns: list[str],
+    skip_empty: bool = True,
+    progress_callback: Callable[[ProgressUpdate], None] | None = None,
+    dedup_db_path: Path | None = None,
+) -> ProcessResult:
+    """Keep only secondary-file rows whose selected column values are not in the main file."""
+    if not keep_columns:
+        raise ValueError("Select at least one column to compare.")
+
+    db_path = dedup_db_path or output_path.with_suffix(".subtract.sqlite")
+    lookup_connection = open_dedup_database(db_path)
+
+    main_header = read_header(main_path)
+    secondary_header = read_header(secondary_path)
+    main_indices = _column_indices(main_header, keep_columns, main_path.name)
+    secondary_indices = _column_indices(secondary_header, keep_columns, secondary_path.name)
+
+    main_rows_indexed = 0
+    secondary_rows_read = 0
+    output_rows = 0
+    duplicates_removed = 0
+    merged_header = merge_row(keep_columns, skip_empty=False)
+
+    def emit_progress(message: str, force: bool = False, percent: int | None = None) -> None:
+        if not progress_callback:
+            return
+        if not force and secondary_rows_read % PROGRESS_ROW_INTERVAL != 0 and main_rows_indexed % PROGRESS_ROW_INTERVAL != 0:
+            return
+        progress_callback(
+            ProgressUpdate(
+                input_rows=secondary_rows_read,
+                output_rows=output_rows,
+                duplicates_removed=duplicates_removed,
+                progress_percent=0 if percent is None else percent,
+                message=message,
+            )
+        )
+
+    try:
+        emit_progress(f"Indexing main file: {main_path.name}", force=True, percent=5)
+
+        for row in _iterate_data_rows(main_path):
+            if not row or all(not cell.strip() for cell in row):
+                continue
+
+            main_rows_indexed += 1
+            selected = [row[i].strip() if i < len(row) else "" for i in main_indices]
+            register_key(lookup_connection, row_key_hash(selected))
+
+            if main_rows_indexed % SQLITE_COMMIT_INTERVAL == 0:
+                lookup_connection.commit()
+                emit_progress(
+                    f"Indexing main file: {main_rows_indexed:,} rows",
+                    percent=min(35, int((main_rows_indexed / max(main_rows_indexed + 1, 1)) * 35)),
+                )
+
+        lookup_connection.commit()
+        emit_progress(
+            f"Indexed {main_rows_indexed:,} rows from main file. Filtering secondary file...",
+            force=True,
+            percent=40,
+        )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8", newline="") as outfile:
+            writer = csv.writer(outfile, quoting=csv.QUOTE_ALL)
+            writer.writerow([merged_header])
+
+            for row in _iterate_data_rows(secondary_path):
+                if not row or all(not cell.strip() for cell in row):
+                    continue
+
+                secondary_rows_read += 1
+                selected = [row[i].strip() if i < len(row) else "" for i in secondary_indices]
+
+                if key_exists(lookup_connection, row_key_hash(selected)):
+                    duplicates_removed += 1
+                    emit_progress(
+                        f"Filtering secondary file: {secondary_path.name}",
+                        percent=min(99, 40 + int((secondary_rows_read / max(secondary_rows_read + 1000, 1)) * 59)),
+                    )
+                    continue
+
+                writer.writerow([merge_row(selected, skip_empty=skip_empty)])
+                output_rows += 1
+                emit_progress(
+                    f"Filtering secondary file: {secondary_path.name}",
+                    percent=min(99, 40 + int((secondary_rows_read / max(secondary_rows_read + 1000, 1)) * 59)),
+                )
+    finally:
+        lookup_connection.close()
+
+    if progress_callback:
+        progress_callback(
+            ProgressUpdate(
+                input_rows=secondary_rows_read,
+                output_rows=output_rows,
+                duplicates_removed=duplicates_removed,
+                progress_percent=100,
+                message="Finalizing output...",
+            )
+        )
+
+    return ProcessResult(
+        input_rows=secondary_rows_read,
+        output_rows=output_rows,
+        duplicates_removed=duplicates_removed,
+        keep_columns=keep_columns,
+        removed_column_count=len(secondary_header) - len(keep_columns),
+        files_processed=2,
     )
 
 
