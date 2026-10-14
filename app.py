@@ -153,6 +153,8 @@ def browse_directory():
 
 @app.get("/api/health")
 def health():
+    import data_sorter
+
     return jsonify(
         {
             "ok": True,
@@ -160,6 +162,7 @@ def health():
             "multi_browse_supported": True,
             "port": APP_PORT,
             "version": APP_VERSION,
+            "engine_path": str(Path(data_sorter.__file__).resolve()),
         }
     )
 

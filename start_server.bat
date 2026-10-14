@@ -5,8 +5,11 @@ cd /d "%~dp0"
 set PORT=5055
 
 echo ==========================================
-echo   CSV Data Sorter - Starting Web Server
+echo   Data Sorter - Starting Web Server
 echo ==========================================
+echo.
+echo Project folder:
+echo   %CD%
 echo.
 
 python --version >nul 2>&1
@@ -41,6 +44,8 @@ echo - Set output folder and filename, then Start processing
 echo.
 start "" "http://127.0.0.1:%PORT%"
 echo Opening browser at http://127.0.0.1:%PORT%
+echo.
+python -c "import app; print('Server version:', app.APP_VERSION); print('Engine:', app.__file__)"
 echo.
 
 python app.py
